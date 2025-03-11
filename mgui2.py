@@ -115,7 +115,8 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
                 valid_data = [row_data[i] for i, h in enumerate(clean_headers) if h]
                 
                 placeholders = ", ".join(["?" for _ in valid_headers])
-                insert_query = f'INSERT INTO {table_name} ({", ".join([f\'"{h}"' for h in valid_headers])}) VALUES ({placeholders})'
+                valid_headers_str = ", ".join([f'"{h}"' for h in valid_headers])
+                insert_query = f'INSERT INTO {table_name} ({valid_headers_str}) VALUES ({placeholders})'
                 
                 cursor.execute(insert_query, valid_data)
         
