@@ -23,14 +23,14 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
     def clean_column_name(name):
         """컬럼 이름에서 공백과 특수문자를 제거하고 SQLite에 적합한 이름으로 변환합니다."""
         if name is None:
-            return "unnamed"
+            return ""
         
         # 문자열로 변환
         name = str(name).strip()
         
         # 빈 이름 처리
         if not name:
-            return "unnamed"
+            return ""
         
         # 공백과 특수문자를 언더스코어로 대체
         import re
@@ -49,7 +49,7 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
             name = name + '_col'
         
         # 숫자로 시작하는 경우 앞에 'col_' 추가
-        if name[0].isdigit():
+        if name and name[0].isdigit():
             name = 'col_' + name
             
         return name
@@ -72,14 +72,24 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
             log(f"엑셀 파일 '{config['path']}' 열기 실패: {e}")
             continue
         
-        # 첫 번째 행에서 컬럼 이름 가져오기
-        header_row = next(sheet.iter_rows(min_row=1, max_row=1))
+        # 헤더 행 결정 (book2는 두 번째 행을 헤더로 사용)
+        header_row_num = 1  # 기본값은 첫 번째 행
+        if 'header_row' in config:
+            header_row_num = config['header_row']
+        
+        # 헤더 행에서 컬럼 이름 가져오기
+        header_row = next(sheet.iter_rows(min_row=header_row_num, max_row=header_row_num))
         column_names = []
+        column_indices = []  # 유효한 컬럼의 인덱스를 저장
         column_name_counts = {}  # 중복 컬럼 이름 처리를 위한 딕셔너리
         
-        for cell in header_row:
+        for idx, cell in enumerate(header_row):
             col_name = clean_column_name(cell.value)
             
+            # 빈 컬럼 이름은 무시
+            if not col_name:
+                continue
+                
             # 중복 컬럼 이름 처리
             if col_name in column_name_counts:
                 column_name_counts[col_name] += 1
@@ -88,6 +98,7 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
                 column_name_counts[col_name] = 0
                 
             column_names.append(col_name)
+            column_indices.append(idx)  # 유효한 컬럼의 인덱스 저장
         
         log(f"컬럼: {', '.join(column_names)}")
         
@@ -99,13 +110,16 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
         cursor.execute(create_table_sql)
         log(f"테이블 '{table_name}' 생성 완료")
         
+        # 데이터 시작 행 결정
+        data_start_row = header_row_num + 1
+        
         # 데이터 삽입
         rows = []
         row_count = 0
-        for row in sheet.iter_rows(min_row=2):  # 첫 번째 행은 헤더로 간주하고 건너뜀
+        for row in sheet.iter_rows(min_row=data_start_row):  # 헤더 다음 행부터 시작
             row_data = []
-            for cell in row:
-                cell_value = cell.value
+            for idx in column_indices:  # 유효한 컬럼만 처리
+                cell_value = row[idx].value
                 row_data.append(str(cell_value) if cell_value is not None else "")
             
             if any(row_data):  # 빈 행은 건너뜀
@@ -183,11 +197,13 @@ class ExcelToSqliteApp:
         self.excel_configs = { 
             'book1': {
                 'path': 'C:/work/doc/1.xlsx',
-                'sheet_name': '1'
+                'sheet_name': '1',
+                'header_row': 1  # 첫 번째 행이 헤더
             },
             'book2': {
                 'path': 'C:/work/doc/2.xlsx',
-                'sheet_name': '1'
+                'sheet_name': '1',
+                'header_row': 2  # 두 번째 행이 헤더
             }
         }
         self.update_config_display()
@@ -201,6 +217,7 @@ class ExcelToSqliteApp:
             self.config_text.insert(tk.END, f"테이블: {table_name}\n")
             self.config_text.insert(tk.END, f"  엑셀 파일: {config['path']}\n")
             self.config_text.insert(tk.END, f"  시트 이름: {config['sheet_name']}\n")
+            self.config_text.insert(tk.END, f"  헤더 행: {config.get('header_row', 1)}\n")
             self.config_text.insert(tk.END, "\n")
     
     def log(self, message):
