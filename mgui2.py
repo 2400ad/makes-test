@@ -20,6 +20,40 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
         else:
             print(message)
     
+    def clean_column_name(name):
+        """컬럼 이름에서 공백과 특수문자를 제거하고 SQLite에 적합한 이름으로 변환합니다."""
+        if name is None:
+            return "unnamed"
+        
+        # 문자열로 변환
+        name = str(name).strip()
+        
+        # 빈 이름 처리
+        if not name:
+            return "unnamed"
+        
+        # 공백과 특수문자를 언더스코어로 대체
+        import re
+        name = re.sub(r'[^\w\s]', '_', name)  # 특수문자를 언더스코어로 변환
+        name = re.sub(r'\s+', '_', name)      # 공백을 언더스코어로 변환
+        
+        # SQLite 예약어 처리
+        reserved_words = ['add', 'all', 'alter', 'and', 'as', 'autoincrement', 'between', 'case', 'check', 'collate', 
+                         'commit', 'constraint', 'create', 'default', 'deferrable', 'delete', 'distinct', 'drop', 
+                         'else', 'escape', 'except', 'exists', 'foreign', 'from', 'group', 'having', 'if', 'in', 
+                         'index', 'insert', 'intersect', 'into', 'is', 'isnull', 'join', 'limit', 'not', 'notnull', 
+                         'null', 'on', 'or', 'order', 'primary', 'references', 'select', 'set', 'table', 'then', 
+                         'to', 'transaction', 'union', 'unique', 'update', 'using', 'values', 'when', 'where']
+        
+        if name.lower() in reserved_words:
+            name = name + '_col'
+        
+        # 숫자로 시작하는 경우 앞에 'col_' 추가
+        if name[0].isdigit():
+            name = 'col_' + name
+            
+        return name
+    
     # SQLite 데이터베이스 연결
     conn = sqlite3.connect(db_file)
     cursor = conn.cursor()
@@ -38,9 +72,23 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
             log(f"엑셀 파일 '{config['path']}' 열기 실패: {e}")
             continue
         
-        # 컬럼 정보 가져오기
-        columns = config['columns']
-        column_names = list(columns.keys())
+        # 첫 번째 행에서 컬럼 이름 가져오기
+        header_row = next(sheet.iter_rows(min_row=1, max_row=1))
+        column_names = []
+        column_name_counts = {}  # 중복 컬럼 이름 처리를 위한 딕셔너리
+        
+        for cell in header_row:
+            col_name = clean_column_name(cell.value)
+            
+            # 중복 컬럼 이름 처리
+            if col_name in column_name_counts:
+                column_name_counts[col_name] += 1
+                col_name = f"{col_name}_{column_name_counts[col_name]}"
+            else:
+                column_name_counts[col_name] = 0
+                
+            column_names.append(col_name)
+        
         log(f"컬럼: {', '.join(column_names)}")
         
         # 테이블이 존재하면 삭제
@@ -56,13 +104,8 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
         row_count = 0
         for row in sheet.iter_rows(min_row=2):  # 첫 번째 행은 헤더로 간주하고 건너뜀
             row_data = []
-            for col_name, col_index in columns.items():
-                # 열 인덱스가 문자열인 경우 정수로 변환 (예: '4' -> 4)
-                if isinstance(col_index, str) and col_index.isdigit():
-                    col_index = int(col_index)
-                
-                # 0-based 인덱스로 변환 (엑셀은 1부터 시작하지만 Python은 0부터 시작)
-                cell_value = row[col_index - 1].value if col_index > 0 else None
+            for cell in row:
+                cell_value = cell.value
                 row_data.append(str(cell_value) if cell_value is not None else "")
             
             if any(row_data):  # 빈 행은 건너뜀
@@ -140,40 +183,11 @@ class ExcelToSqliteApp:
         self.excel_configs = { 
             'book1': {
                 'path': 'C:/work/doc/1.xlsx',
-                'sheet_name': '1',
-                'columns': {
-                    'mapping_seq': 2, 
-                    'songsin_seq': 3,
-                    'interface_name': 6,
-                    'interface_id': 11,
-                    'songsin_upmu': 17,
-                    'songsin_system': 7,
-                    'songsin_table': 19,
-                    'susin_upmu': 20,
-                    'susin_system': 9,
-                    'susin_table': 22,
-                    'group_id': 23,
-                    'event_id': 24,
-                    'routing_info': 25,
-                    'schedule': 15,
-                    'jooki': 16
-                }
+                'sheet_name': '1'
             },
             'book2': {
                 'path': 'C:/work/doc/2.xlsx',
-                'sheet_name': '1',
-                'columns': {
-                    'mapping_seq': 7, 
-                    'songsin_qmgr': 11,
-                    'songsin_db': 13,
-                    'susin_qmgr': 17,
-                    'susin_db': 19,
-                    'songsin_db_id': 26,
-                    'songsin_db_password': 27,
-                    'susin_db_id': 30,
-                    'susin_db_password': 31,
-                    'hub_qmgr': 14
-                }
+                'sheet_name': '1'
             }
         }
         self.update_config_display()
@@ -187,11 +201,6 @@ class ExcelToSqliteApp:
             self.config_text.insert(tk.END, f"테이블: {table_name}\n")
             self.config_text.insert(tk.END, f"  엑셀 파일: {config['path']}\n")
             self.config_text.insert(tk.END, f"  시트 이름: {config['sheet_name']}\n")
-            self.config_text.insert(tk.END, f"  컬럼 매핑:\n")
-            
-            for col_name, col_index in config['columns'].items():
-                self.config_text.insert(tk.END, f"    {col_name}: {col_index}\n")
-            
             self.config_text.insert(tk.END, "\n")
     
     def log(self, message):
