@@ -98,7 +98,7 @@ class ExcelToSqliteApp:
         
         # 기본 설정
         self.excel_configs = {}
-        self.db_file = "test.db"
+        self.db_file = "mgui2.db"
         
         # UI 구성
         self.create_widgets()
@@ -142,9 +142,37 @@ class ExcelToSqliteApp:
                 'path': 'C:/work/doc/1.xlsx',
                 'sheet_name': '1',
                 'columns': {
-                    'seq1': 2, 
-                    'seq2': 3,
-                    'i_name': '4'
+                    'mapping_seq': 2, 
+                    'songsin_seq': 3,
+                    'interface_name': 6,
+                    'interface_id': 11,
+                    'songsin_upmu': 17,
+                    'songsin_system': 7,
+                    'songsin_table': 19,
+                    'susin_upmu': 20,
+                    'susin_system': 9,
+                    'susin_table': 22,
+                    'group_id': 23,
+                    'event_id': 24,
+                    'routing_info': 25,
+                    'schedule': 15,
+                    'jooki': 16
+                }
+            },
+            'book2': {
+                'path': 'C:/work/doc/2.xlsx',
+                'sheet_name': '1',
+                'columns': {
+                    'mapping_seq': 7, 
+                    'songsin_qmgr': 11,
+                    'songsin_db': 13,
+                    'susin_qmgr': 17,
+                    'susin_db': 19,
+                    'songsin_db_id': 26,
+                    'songsin_db_password': 27,
+                    'susin_db_id': 30,
+                    'susin_db_password': 31,
+                    'hub_qmgr': 14
                 }
             }
         }
