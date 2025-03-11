@@ -1,18 +1,22 @@
-import openpyxl
-import sqlite3
 import os
+import sqlite3
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import ttk, filedialog, messagebox, scrolledtext
 from tkinter.scrolledtext import ScrolledText
+import openpyxl
+import re
 
 def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
     """
-    엑셀 파일의 데이터를 SQLite 데이터베이스로 변환합니다.
+    엑셀 파일을 SQLite 데이터베이스로 변환합니다.
     
     Args:
-        excel_configs (dict): 엑셀 파일 구성 정보를 담은 딕셔너리
+        excel_configs (dict): 엑셀 파일 설정 정보
         db_file (str): SQLite 데이터베이스 파일 경로
-        log_callback (function): 로그 메시지를 표시하기 위한 콜백 함수
+        log_callback (function): 로그 출력 콜백 함수
+    
+    Returns:
+        bool: 성공 여부
     """
     def log(message):
         if log_callback:
@@ -20,132 +24,128 @@ def excel_to_sqlite(excel_configs, db_file='test.db', log_callback=None):
         else:
             print(message)
     
-    def clean_column_name(name):
-        """컬럼 이름에서 공백과 특수문자를 제거하고 SQLite에 적합한 이름으로 변환합니다."""
-        if name is None:
-            return ""
+    def clean_column_name(name, used_names=None):
+        if used_names is None:
+            used_names = set()
         
-        # 문자열로 변환
+        # 빈 컬럼명 처리
+        if not name or name.strip() == "":
+            return None  # 빈 컬럼명은 None 반환하여 처리하지 않음
+        
+        # 공백 및 특수문자 제거, 소문자로 변환
         name = str(name).strip()
-        
-        # 빈 이름 처리
-        if not name:
-            return ""
-        
-        # 공백과 특수문자를 언더스코어로 대체
-        import re
         name = re.sub(r'[^\w\s]', '_', name)  # 특수문자를 언더스코어로 변환
         name = re.sub(r'\s+', '_', name)      # 공백을 언더스코어로 변환
         
-        # SQLite 예약어 처리
-        reserved_words = ['add', 'all', 'alter', 'and', 'as', 'autoincrement', 'between', 'case', 'check', 'collate', 
-                         'commit', 'constraint', 'create', 'default', 'deferrable', 'delete', 'distinct', 'drop', 
-                         'else', 'escape', 'except', 'exists', 'foreign', 'from', 'group', 'having', 'if', 'in', 
-                         'index', 'insert', 'intersect', 'into', 'is', 'isnull', 'join', 'limit', 'not', 'notnull', 
-                         'null', 'on', 'or', 'order', 'primary', 'references', 'select', 'set', 'table', 'then', 
-                         'to', 'transaction', 'union', 'unique', 'update', 'using', 'values', 'when', 'where']
+        # 숫자로 시작하는 경우 접두어 추가
+        if name[0].isdigit():
+            name = 'col_' + name
         
-        if name.lower() in reserved_words:
+        # SQLite 예약어 확인 및 처리
+        sqlite_keywords = ['ABORT', 'ACTION', 'ADD', 'AFTER', 'ALL', 'ALTER', 'ANALYZE', 'AND', 'AS', 'ASC', 
+                          'ATTACH', 'AUTOINCREMENT', 'BEFORE', 'BEGIN', 'BETWEEN', 'BY', 'CASCADE', 'CASE', 
+                          'CAST', 'CHECK', 'COLLATE', 'COLUMN', 'COMMIT', 'CONFLICT', 'CONSTRAINT', 'CREATE', 
+                          'CROSS', 'CURRENT_DATE', 'CURRENT_TIME', 'CURRENT_TIMESTAMP', 'DATABASE', 'DEFAULT', 
+                          'DEFERRABLE', 'DEFERRED', 'DELETE', 'DESC', 'DETACH', 'DISTINCT', 'DROP', 'EACH', 
+                          'ELSE', 'END', 'ESCAPE', 'EXCEPT', 'EXCLUSIVE', 'EXISTS', 'EXPLAIN', 'FAIL', 'FOR', 
+                          'FOREIGN', 'FROM', 'FULL', 'GLOB', 'GROUP', 'HAVING', 'IF', 'IGNORE', 'IMMEDIATE', 
+                          'IN', 'INDEX', 'INDEXED', 'INITIALLY', 'INNER', 'INSERT', 'INSTEAD', 'INTERSECT', 
+                          'INTO', 'IS', 'ISNULL', 'JOIN', 'KEY', 'LEFT', 'LIKE', 'LIMIT', 'MATCH', 'NATURAL', 
+                          'NO', 'NOT', 'NOTNULL', 'NULL', 'OF', 'OFFSET', 'ON', 'OR', 'ORDER', 'OUTER', 'PLAN', 
+                          'PRAGMA', 'PRIMARY', 'QUERY', 'RAISE', 'RECURSIVE', 'REFERENCES', 'REGEXP', 'REINDEX', 
+                          'RELEASE', 'RENAME', 'REPLACE', 'RESTRICT', 'RIGHT', 'ROLLBACK', 'ROW', 'SAVEPOINT', 
+                          'SELECT', 'SET', 'TABLE', 'TEMP', 'TEMPORARY', 'THEN', 'TO', 'TRANSACTION', 'TRIGGER', 
+                          'UNION', 'UNIQUE', 'UPDATE', 'USING', 'VACUUM', 'VALUES', 'VIEW', 'VIRTUAL', 'WHEN', 
+                          'WHERE', 'WITH', 'WITHOUT']
+        
+        if name.upper() in sqlite_keywords:
             name = name + '_col'
         
-        # 숫자로 시작하는 경우 앞에 'col_' 추가
-        if name and name[0].isdigit():
-            name = 'col_' + name
-            
+        # 중복 컬럼명 처리
+        original_name = name
+        counter = 1
+        while name.lower() in [n.lower() for n in used_names]:
+            name = f"{original_name}_{counter}"
+            counter += 1
+        
+        used_names.add(name)
         return name
     
-    # SQLite 데이터베이스 연결
-    conn = sqlite3.connect(db_file)
-    cursor = conn.cursor()
-    
-    # 각 엑셀 설정에 대해 처리
-    for table_name, config in excel_configs.items():
-        log(f"테이블 '{table_name}' 처리 중...")
+    try:
+        # SQLite 데이터베이스 연결
+        conn = sqlite3.connect(db_file)
+        cursor = conn.cursor()
         
-        # 엑셀 파일 열기
-        try:
-            log(f"엑셀 파일 '{config['path']}' 열기...")
-            workbook = openpyxl.load_workbook(config['path'], read_only=True, data_only=True)
-            sheet = workbook[config['sheet_name']]
-            log(f"시트 '{config['sheet_name']}' 로드 완료")
-        except Exception as e:
-            log(f"엑셀 파일 '{config['path']}' 열기 실패: {e}")
-            continue
-        
-        # 헤더 행 결정 (book2는 두 번째 행을 헤더로 사용)
-        header_row_num = 1  # 기본값은 첫 번째 행
-        if 'header_row' in config:
-            header_row_num = config['header_row']
-        
-        # 헤더 행에서 컬럼 이름 가져오기
-        header_row = next(sheet.iter_rows(min_row=header_row_num, max_row=header_row_num))
-        column_names = []
-        column_indices = []  # 유효한 컬럼의 인덱스를 저장
-        column_name_counts = {}  # 중복 컬럼 이름 처리를 위한 딕셔너리
-        
-        for idx, cell in enumerate(header_row):
-            col_name = clean_column_name(cell.value)
+        for table_name, config in excel_configs.items():
+            excel_path = config['path']
+            sheet_name = config['sheet_name']
+            header_row = config.get('header_row', 1)  # 기본값은 1 (첫 번째 행)
             
-            # 빈 컬럼 이름은 무시
-            if not col_name:
+            log(f"엑셀 파일 '{excel_path}' 처리 중...")
+            
+            # 엑셀 파일 로드
+            if not os.path.exists(excel_path):
+                log(f"엑셀 파일 '{excel_path}'이 존재하지 않습니다.")
                 continue
-                
-            # 중복 컬럼 이름 처리
-            if col_name in column_name_counts:
-                column_name_counts[col_name] += 1
-                col_name = f"{col_name}_{column_name_counts[col_name]}"
-            else:
-                column_name_counts[col_name] = 0
-                
-            column_names.append(col_name)
-            column_indices.append(idx)  # 유효한 컬럼의 인덱스 저장
-        
-        log(f"컬럼: {', '.join(column_names)}")
-        
-        # 테이블이 존재하면 삭제
-        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-        
-        # 테이블 생성
-        create_table_sql = f"CREATE TABLE {table_name} ({', '.join([f'{col} TEXT' for col in column_names])})"
-        cursor.execute(create_table_sql)
-        log(f"테이블 '{table_name}' 생성 완료")
-        
-        # 데이터 시작 행 결정
-        data_start_row = header_row_num + 1
-        
-        # 데이터 삽입
-        rows = []
-        row_count = 0
-        for row in sheet.iter_rows(min_row=data_start_row):  # 헤더 다음 행부터 시작
-            row_data = []
-            for idx in column_indices:  # 유효한 컬럼만 처리
-                cell_value = row[idx].value
-                row_data.append(str(cell_value) if cell_value is not None else "")
             
-            if any(row_data):  # 빈 행은 건너뜀
-                rows.append(row_data)
-                row_count += 1
+            workbook = openpyxl.load_workbook(excel_path, data_only=True)
+            
+            if sheet_name not in workbook.sheetnames:
+                log(f"시트 '{sheet_name}'이 존재하지 않습니다.")
+                continue
+            
+            sheet = workbook[sheet_name]
+            
+            # 헤더 행 읽기 (컬럼명)
+            header_cells = list(sheet.rows)[header_row - 1]
+            used_column_names = set()
+            columns = []
+            
+            for cell in header_cells:
+                column_name = clean_column_name(cell.value, used_column_names)
+                if column_name:  # 빈 컬럼명이 아닌 경우만 추가
+                    columns.append(column_name)
+            
+            if not columns:
+                log(f"유효한 컬럼이 없습니다.")
+                continue
+            
+            # 테이블 생성
+            columns_sql = ', '.join([f'"{col}" TEXT' for col in columns])
+            cursor.execute(f'DROP TABLE IF EXISTS {table_name}')
+            cursor.execute(f'CREATE TABLE {table_name} ({columns_sql})')
+            
+            log(f"테이블 '{table_name}' 생성됨")
+            
+            # 데이터 삽입
+            data_rows = list(sheet.rows)[header_row:]  # 헤더 다음 행부터 데이터
+            
+            for row in data_rows:
+                values = []
+                for i, cell in enumerate(row):
+                    if i < len(columns):  # 컬럼 수만큼만 처리
+                        value = cell.value if cell.value is not None else ""
+                        values.append(value)
                 
-                # 1000행마다 데이터베이스에 삽입하고 로그 출력
-                if row_count % 1000 == 0:
-                    log(f"{row_count}행 처리 중...")
+                if len(values) < len(columns):
+                    values.extend([""] * (len(columns) - len(values)))
+                
+                placeholders = ', '.join(['?' for _ in columns])
+                cursor.execute(f'INSERT INTO {table_name} VALUES ({placeholders})', values[:len(columns)])
+            
+            log(f"테이블 '{table_name}'에 {len(data_rows)}개의 행이 삽입됨")
         
-        # 데이터 일괄 삽입
-        placeholders = ', '.join(['?' for _ in column_names])
-        insert_sql = f"INSERT INTO {table_name} ({', '.join(column_names)}) VALUES ({placeholders})"
-        cursor.executemany(insert_sql, rows)
-        log(f"총 {len(rows)}행 삽입 완료")
+        # 변경사항 저장
+        conn.commit()
+        log("데이터베이스 저장 완료")
         
-        # 워크북 닫기
-        workbook.close()
-    
-    # 변경사항 저장 및 연결 종료
-    conn.commit()
-    conn.close()
-    
-    log(f"데이터베이스 '{db_file}'에 성공적으로 데이터를 저장했습니다.")
-    return True
-
+        # 연결 종료
+        conn.close()
+        return True
+        
+    except Exception as e:
+        log(f"오류 발생: {e}")
+        return False
 
 class ExcelToSqliteApp:
     def __init__(self, root):
@@ -174,15 +174,20 @@ class ExcelToSqliteApp:
         log_frame = ttk.LabelFrame(self.root, text="로그", padding="10")
         log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # 상단 버튼
+        # 상단 버튼 및 검색 UI
         self.convert_btn = ttk.Button(top_frame, text="엑셀 -> SQLite 변환", command=self.convert)
         self.convert_btn.pack(side=tk.LEFT, padx=5)
         
-        self.select_excel_btn = ttk.Button(top_frame, text="엑셀 파일 선택", command=self.select_excel_file)
-        self.select_excel_btn.pack(side=tk.LEFT, padx=5)
+        # 매핑SEQ 검색 UI
+        ttk.Label(top_frame, text="매핑SEQ:").pack(side=tk.LEFT, padx=(20, 5))
         
-        self.select_db_btn = ttk.Button(top_frame, text="DB 파일 선택", command=self.select_db_file)
-        self.select_db_btn.pack(side=tk.LEFT, padx=5)
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(top_frame, textvariable=self.search_var, width=15)
+        self.search_entry.pack(side=tk.LEFT, padx=5)
+        self.search_entry.bind("<Return>", lambda event: self.search_mapping_seq())
+        
+        self.search_btn = ttk.Button(top_frame, text="Search", command=self.search_mapping_seq)
+        self.search_btn.pack(side=tk.LEFT, padx=5)
         
         # 설정 표시 영역
         self.config_text = ScrolledText(config_frame, height=10)
@@ -226,32 +231,145 @@ class ExcelToSqliteApp:
         self.log_text.see(tk.END)  # 스크롤을 가장 아래로 이동
         self.root.update()  # UI 업데이트
     
-    def select_excel_file(self):
-        # 엑셀 파일 선택
-        file_path = filedialog.askopenfilename(
-            title="엑셀 파일 선택",
-            filetypes=[("Excel Files", "*.xlsx;*.xls"), ("All Files", "*.*")]
-        )
+    def search_mapping_seq(self):
+        # 매핑SEQ로 검색하는 함수
+        mapping_seq = self.search_var.get().strip()
+        if not mapping_seq:
+            messagebox.showwarning("검색 오류", "매핑SEQ를 입력하세요.")
+            return
         
-        if file_path:
-            # 간단한 구현을 위해 첫 번째 테이블의 경로만 변경
-            table_name = list(self.excel_configs.keys())[0]
-            self.excel_configs[table_name]['path'] = file_path
-            self.update_config_display()
-            self.log(f"엑셀 파일 경로가 {file_path}로 변경되었습니다.")
-    
-    def select_db_file(self):
-        # 데이터베이스 파일 선택
-        file_path = filedialog.asksaveasfilename(
-            title="SQLite 데이터베이스 파일 선택",
-            defaultextension=".db",
-            filetypes=[("SQLite Database", "*.db"), ("All Files", "*.*")]
-        )
-        
-        if file_path:
-            self.db_file = file_path
-            self.update_config_display()
-            self.log(f"데이터베이스 파일 경로가 {file_path}로 변경되었습니다.")
+        try:
+            # SQLite 데이터베이스 연결
+            if not os.path.exists(self.db_file):
+                messagebox.showwarning("검색 오류", f"데이터베이스 파일({self.db_file})이 존재하지 않습니다. 먼저 변환을 실행하세요.")
+                return
+                
+            conn = sqlite3.connect(self.db_file)
+            cursor = conn.cursor()
+            
+            # 테이블 존재 여부 확인
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='book2'")
+            if not cursor.fetchone():
+                messagebox.showwarning("검색 오류", "book2 테이블이 존재하지 않습니다. 먼저 변환을 실행하세요.")
+                conn.close()
+                return
+            
+            # 컬럼 정보 가져오기
+            cursor.execute(f"PRAGMA table_info(book2)")
+            columns = [column[1] for column in cursor.fetchall()]
+            
+            # 매핑SEQ 컬럼 존재 여부 확인
+            if "매핑SEQ" not in columns:
+                # 컬럼명이 정리되었을 수 있으므로 가능한 변형 확인
+                mapping_seq_col = None
+                for col in columns:
+                    if col.lower() == "매핑seq" or col.lower() == "매핑_seq" or col.lower() == "매핑seq_" or col.lower() == "매핑_seq_":
+                        mapping_seq_col = col
+                        break
+                
+                if not mapping_seq_col:
+                    messagebox.showwarning("검색 오류", "매핑SEQ 컬럼이 존재하지 않습니다.")
+                    conn.close()
+                    return
+            else:
+                mapping_seq_col = "매핑SEQ"
+            
+            # GroupID와 EventID 컬럼 확인
+            group_id_col = None
+            event_id_col = None
+            for col in columns:
+                if "group" in col.lower() and "id" in col.lower():
+                    group_id_col = col
+                if "event" in col.lower() and "id" in col.lower():
+                    event_id_col = col
+            
+            # 송신 및 수신 관련 컬럼 찾기
+            send_task_col = None
+            send_qmgr_col = None
+            recv_task_col = None
+            recv_qmgr_col = None
+            
+            for col in columns:
+                if "송신" in col and "업무" in col:
+                    send_task_col = col
+                if "송신" in col and "qmgr" in col.lower():
+                    send_qmgr_col = col
+                if "수신" in col and "업무" in col:
+                    recv_task_col = col
+                if "수신" in col and "qmgr" in col.lower():
+                    recv_qmgr_col = col
+            
+            # 검색 실행
+            query = f"SELECT * FROM book2 WHERE {mapping_seq_col} = ?"
+            cursor.execute(query, (mapping_seq,))
+            row = cursor.fetchone()
+            
+            if not row:
+                messagebox.showinfo("검색 결과", f"매핑SEQ '{mapping_seq}'에 해당하는 데이터가 없습니다.")
+                conn.close()
+                return
+            
+            # 결과 표시
+            self.config_text.delete(1.0, tk.END)
+            
+            # 매핑SEQ 표시
+            self.config_text.insert(tk.END, f"[매핑SEQ] {row[columns.index(mapping_seq_col)]}\n\n")
+            
+            # INTERFACE ID 표시 (GroupID.EventID)
+            interface_id = ""
+            if group_id_col and event_id_col:
+                group_id = row[columns.index(group_id_col)]
+                event_id = row[columns.index(event_id_col)]
+                interface_id = f"{group_id}.{event_id}"
+            
+            self.config_text.insert(tk.END, f"[INTERFACE ID] {interface_id}\n\n")
+            
+            # 송신 정보 표시
+            send_info = ""
+            if send_task_col:
+                send_task = row[columns.index(send_task_col)]
+                send_info = f"[송신_업무명] {send_task}"
+            
+            if send_qmgr_col:
+                send_qmgr = row[columns.index(send_qmgr_col)]
+                if send_info:
+                    send_info += f"    [송신_QMGR명] {send_qmgr}"
+                else:
+                    send_info = f"[송신_QMGR명] {send_qmgr}"
+            
+            if send_info:
+                self.config_text.insert(tk.END, f"{send_info}\n\n")
+            
+            # 수신 정보 표시
+            recv_info = ""
+            if recv_task_col:
+                recv_task = row[columns.index(recv_task_col)]
+                recv_info = f"[수신_업무명] {recv_task}"
+            
+            if recv_qmgr_col:
+                recv_qmgr = row[columns.index(recv_qmgr_col)]
+                if recv_info:
+                    recv_info += f"    [수신_QMGR명] {recv_qmgr}"
+                else:
+                    recv_info = f"[수신_QMGR명] {recv_qmgr}"
+            
+            if recv_info:
+                self.config_text.insert(tk.END, f"{recv_info}\n\n")
+            
+            # 추가 정보 표시 (모든 컬럼 표시)
+            self.config_text.insert(tk.END, "--- 추가 정보 ---\n")
+            for i, col in enumerate(columns):
+                if col not in [mapping_seq_col, group_id_col, event_id_col, 
+                              send_task_col, send_qmgr_col, recv_task_col, recv_qmgr_col]:
+                    value = row[i] if i < len(row) else ""
+                    self.config_text.insert(tk.END, f"[{col}] {value}\n")
+            
+            conn.close()
+            self.log(f"매핑SEQ '{mapping_seq}' 검색 완료")
+            
+        except Exception as e:
+            self.log(f"검색 중 오류 발생: {e}")
+            messagebox.showerror("검색 오류", f"검색 중 오류가 발생했습니다: {e}")
     
     def convert(self):
         # 변환 시작
@@ -271,7 +389,6 @@ class ExcelToSqliteApp:
         
         finally:
             self.convert_btn.config(state=tk.NORMAL)
-
 
 if __name__ == "__main__":
     root = tk.Tk()
