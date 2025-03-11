@@ -216,14 +216,13 @@ class ExcelToSqliteApp:
     def update_config_display(self):
         # 설정 정보 표시
         self.config_text.delete(1.0, tk.END)
-        self.config_text.insert(tk.END, f"데이터베이스 파일: {self.db_file}\n\n")
+        self.config_text.insert(tk.END, f"데이터베이스 파일: {self.db_file}\n")
         
         for table_name, config in self.excel_configs.items():
             self.config_text.insert(tk.END, f"테이블: {table_name}\n")
             self.config_text.insert(tk.END, f"  엑셀 파일: {config['path']}\n")
             self.config_text.insert(tk.END, f"  시트 이름: {config['sheet_name']}\n")
             self.config_text.insert(tk.END, f"  헤더 행: {config.get('header_row', 1)}\n")
-            self.config_text.insert(tk.END, "\n")
     
     def log(self, message):
         # 로그 메시지 추가
@@ -289,15 +288,51 @@ class ExcelToSqliteApp:
             recv_task_col = None
             recv_qmgr_col = None
             
+            # SQL 관련 컬럼 찾기
+            send_userid_col = None
+            send_passwd_col = None
+            send_db_col = None
+            send_schema_adapter_col = None
+            send_table_adapter_col = None
+            
+            recv_userid_col = None
+            recv_passwd_col = None
+            recv_db_col = None
+            recv_schema_adapter_col = None
+            recv_table_adapter_col = None
+            
             for col in columns:
+                # 송신 관련 컬럼
                 if "송신" in col and "업무" in col:
                     send_task_col = col
                 if "송신" in col and "qmgr" in col.lower():
                     send_qmgr_col = col
+                if "송신" in col and "userid" in col.lower():
+                    send_userid_col = col
+                if "송신" in col and ("passwd" in col.lower() or "password" in col.lower()):
+                    send_passwd_col = col
+                if "송신" in col and "db" in col.lower():
+                    send_db_col = col
+                if "송신" in col and "schema" in col.lower() and "adapter" in col.lower():
+                    send_schema_adapter_col = col
+                if "송신" in col and "table" in col.lower() and "adapter" in col.lower():
+                    send_table_adapter_col = col
+                
+                # 수신 관련 컬럼
                 if "수신" in col and "업무" in col:
                     recv_task_col = col
                 if "수신" in col and "qmgr" in col.lower():
                     recv_qmgr_col = col
+                if "수신" in col and "userid" in col.lower():
+                    recv_userid_col = col
+                if "수신" in col and ("passwd" in col.lower() or "password" in col.lower()):
+                    recv_passwd_col = col
+                if "수신" in col and "db" in col.lower():
+                    recv_db_col = col
+                if "수신" in col and "schema" in col.lower() and "adapter" in col.lower():
+                    recv_schema_adapter_col = col
+                if "수신" in col and "table" in col.lower() and "adapter" in col.lower():
+                    recv_table_adapter_col = col
             
             # 검색 실행
             query = f"SELECT * FROM book2 WHERE {mapping_seq_col} = ?"
@@ -313,7 +348,7 @@ class ExcelToSqliteApp:
             self.config_text.delete(1.0, tk.END)
             
             # 매핑SEQ 표시
-            self.config_text.insert(tk.END, f"[매핑SEQ] {row[columns.index(mapping_seq_col)]}\n\n")
+            self.config_text.insert(tk.END, f"[매핑SEQ] {row[columns.index(mapping_seq_col)]}\n")
             
             # INTERFACE ID 표시 (GroupID.EventID)
             interface_id = ""
@@ -322,7 +357,7 @@ class ExcelToSqliteApp:
                 event_id = row[columns.index(event_id_col)]
                 interface_id = f"{group_id}.{event_id}"
             
-            self.config_text.insert(tk.END, f"[INTERFACE ID] {interface_id}\n\n")
+            self.config_text.insert(tk.END, f"[INTERFACE ID] {interface_id}\n")
             
             # 송신 정보 표시
             send_info = ""
@@ -338,7 +373,7 @@ class ExcelToSqliteApp:
                     send_info = f"[송신_QMGR명] {send_qmgr}"
             
             if send_info:
-                self.config_text.insert(tk.END, f"{send_info}\n\n")
+                self.config_text.insert(tk.END, f"\n{send_info}")
             
             # 수신 정보 표시
             recv_info = ""
@@ -354,15 +389,48 @@ class ExcelToSqliteApp:
                     recv_info = f"[수신_QMGR명] {recv_qmgr}"
             
             if recv_info:
-                self.config_text.insert(tk.END, f"{recv_info}\n\n")
+                self.config_text.insert(tk.END, f"\n{recv_info}")
+            
+            # SQL 정보 추가
+            # 송신 SQL
+            send_sql = "\n[송신SQL]"
+            
+            send_userid = row[columns.index(send_userid_col)] if send_userid_col and columns.index(send_userid_col) < len(row) else "?"
+            send_passwd = row[columns.index(send_passwd_col)] if send_passwd_col and columns.index(send_passwd_col) < len(row) else "?"
+            send_db = row[columns.index(send_db_col)] if send_db_col and columns.index(send_db_col) < len(row) else "?"
+            send_schema = row[columns.index(send_schema_adapter_col)] if send_schema_adapter_col and columns.index(send_schema_adapter_col) < len(row) else "?"
+            send_table = row[columns.index(send_table_adapter_col)] if send_table_adapter_col and columns.index(send_table_adapter_col) < len(row) else "?"
+            
+            send_sql += f"\nsqlplus {send_userid}/{send_passwd}@{send_db}"
+            send_sql += f"\nselect count(*) from {send_schema}.{send_table} where EAI_TRANSFER_DATE > sysdate-(1/12) and EAI_TRANSFER_FLAG='Y';"
+            
+            self.config_text.insert(tk.END, send_sql)
+            
+            # 수신 SQL
+            recv_sql = "\n[수신SQL]"
+            
+            recv_userid = row[columns.index(recv_userid_col)] if recv_userid_col and columns.index(recv_userid_col) < len(row) else "?"
+            recv_passwd = row[columns.index(recv_passwd_col)] if recv_passwd_col and columns.index(recv_passwd_col) < len(row) else "?"
+            recv_db = row[columns.index(recv_db_col)] if recv_db_col and columns.index(recv_db_col) < len(row) else "?"
+            recv_schema = row[columns.index(recv_schema_adapter_col)] if recv_schema_adapter_col and columns.index(recv_schema_adapter_col) < len(row) else "?"
+            recv_table = row[columns.index(recv_table_adapter_col)] if recv_table_adapter_col and columns.index(recv_table_adapter_col) < len(row) else "?"
+            
+            recv_sql += f"\nsqlplus {recv_userid}/{recv_passwd}@{recv_db}"
+            recv_sql += f"\nselect count(*) from {recv_schema}.{recv_table} where EAI_TRANSFER_DATE > sysdate-(1/12);"
+            
+            self.config_text.insert(tk.END, recv_sql)
             
             # 추가 정보 표시 (모든 컬럼 표시)
-            self.config_text.insert(tk.END, "--- 추가 정보 ---\n")
+            self.config_text.insert(tk.END, "\n\n--- 추가 정보 ---")
             for i, col in enumerate(columns):
                 if col not in [mapping_seq_col, group_id_col, event_id_col, 
-                              send_task_col, send_qmgr_col, recv_task_col, recv_qmgr_col]:
+                              send_task_col, send_qmgr_col, recv_task_col, recv_qmgr_col,
+                              send_userid_col, send_passwd_col, send_db_col, 
+                              send_schema_adapter_col, send_table_adapter_col,
+                              recv_userid_col, recv_passwd_col, recv_db_col,
+                              recv_schema_adapter_col, recv_table_adapter_col]:
                     value = row[i] if i < len(row) else ""
-                    self.config_text.insert(tk.END, f"[{col}] {value}\n")
+                    self.config_text.insert(tk.END, f"\n[{col}] {value}")
             
             conn.close()
             self.log(f"매핑SEQ '{mapping_seq}' 검색 완료")
