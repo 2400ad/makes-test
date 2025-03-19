@@ -2,25 +2,27 @@ import sqlite3
 import os
 import sys
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, StringVar
 from tkinter.scrolledtext import ScrolledText
+import csv
+import io
 
 class SQLiteQueryApp:
     def __init__(self, root):
         self.root = root
         self.root.title("SQLite 쿼리 도구")
-        self.root.geometry("900x700")
+        self.root.geometry("1000x700")
         
         # 데이터베이스 파일 경로
         self.db_file = ""
         self.conn = None
         self.cursor = None
         
-        # 하드코딩된 쿼리 상수
-        self.QUERY_CONSTANTS = {
-            'AAA.TAB1': {'system': 'AAA', 'table': 'TAB1'},
-            'BBB.TAB2': {'system': 'BBB', 'table': 'TAB2'}
-        }
+        # 하드코딩된 입력값 (탭으로 구분된 값)
+        self.tb_value = '''
+AAA.TAB1	BBB.TAB2
+CCC.TAB1	DDD.TAB2
+'''
         
         # UI 구성
         self.create_widgets()
@@ -65,13 +67,27 @@ class SQLiteQueryApp:
         self.query_text = ScrolledText(query_frame, height=5)
         self.query_text.pack(fill=tk.X)
         
+        # 하드코딩된 입력값 표시 영역
+        input_frame = ttk.LabelFrame(right_panel, text="하드코딩된 입력값", padding="10")
+        input_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.input_text = ScrolledText(input_frame, height=3)
+        self.input_text.pack(fill=tk.X)
+        self.input_text.insert(tk.END, self.tb_value)
+        self.input_text.config(state=tk.DISABLED)  # 읽기 전용으로 설정
+        
         # 특수 쿼리 버튼 영역
         special_query_frame = ttk.LabelFrame(right_panel, text="특수 쿼리", padding="10")
         special_query_frame.pack(fill=tk.X, pady=(0, 5))
         
-        self.special_query_btn = ttk.Button(special_query_frame, text="AAA.TAB1, BBB.TAB2 쿼리 실행", 
+        self.special_query_btn = ttk.Button(special_query_frame, text="모든 입력값에 대한 쿼리 실행", 
                                            command=self.execute_special_query)
-        self.special_query_btn.pack(padx=5, pady=5)
+        self.special_query_btn.pack(side=tk.LEFT, padx=5, pady=5)
+        
+        # 결과 복사 버튼
+        self.copy_btn = ttk.Button(special_query_frame, text="결과를 엑셀 형식으로 복사", 
+                                  command=self.copy_results_to_clipboard)
+        self.copy_btn.pack(side=tk.LEFT, padx=5, pady=5)
         
         # 쿼리 실행 버튼
         btn_frame = ttk.Frame(right_panel)
@@ -206,55 +222,137 @@ class SQLiteQueryApp:
         self.query_text.insert(tk.END, f"PRAGMA table_info({table_name})")
         self.execute_query()
     
+    def parse_input_value(self, line):
+        """입력값 한 줄을 파싱하여 송신/수신 시스템 및 테이블 정보 추출"""
+        if not line.strip():
+            return None
+            
+        parts = line.strip().split('\t')
+        if len(parts) != 2:
+            return None
+            
+        send_parts = parts[0].split('.')
+        recv_parts = parts[1].split('.')
+        
+        if len(send_parts) != 2 or len(recv_parts) != 2:
+            return None
+            
+        return {
+            'send_system': send_parts[0],
+            'send_table': send_parts[1],
+            'recv_system': recv_parts[0],
+            'recv_table': recv_parts[1]
+        }
+    
     def execute_special_query(self):
-        """하드코딩된 특수 쿼리 실행 (AAA.TAB1, BBB.TAB2)"""
+        """하드코딩된 입력값에 대한 쿼리 실행"""
         if not self.conn:
             messagebox.showwarning("경고", "먼저 데이터베이스에 연결하세요.")
             return
         
-        # 하드코딩된 값 사용
-        system1 = 'AAA'
-        table1 = 'TAB1'
-        system2 = 'BBB'
-        table2 = 'TAB2'
+        # 입력값 파싱
+        input_lines = self.tb_value.strip().split('\n')
+        parsed_inputs = []
         
-        # 하드코딩된 컬럼 이름
-        col1 = 'COL1X'
-        col2 = 'COL2X'
-        col3 = 'COL3X'
-        col4 = 'COL4X'
+        for line in input_lines:
+            parsed = self.parse_input_value(line)
+            if parsed:
+                parsed_inputs.append(parsed)
         
-        # 쿼리 생성
-        query = f"""
-        SELECT * FROM book2 
-        WHERE {col1} = '{system1}' 
-        AND {col2} = '{table1}' 
-        AND {col3} = '{system2}' 
-        AND {col4} = '{table2}'
-        """
+        if not parsed_inputs:
+            messagebox.showinfo("정보", "유효한 입력값이 없습니다.")
+            return
         
-        # 쿼리 표시 및 실행
-        self.query_text.delete(1.0, tk.END)
-        self.query_text.insert(tk.END, query)
+        # 결과를 저장할 리스트
+        all_results = []
+        all_column_names = None
         
-        try:
-            # 쿼리 실행
-            self.cursor.execute(query)
+        # 각 입력값에 대해 쿼리 실행
+        for idx, input_data in enumerate(parsed_inputs):
+            # 쿼리 생성
+            query = f"""
+            SELECT GroupID, EventID, 송신_QMGR명, 송신_DB명, 송신_userid, 송신_passwd, 
+                   수신_QMGR명, 수신_DB명, 수신_userid, 수신_passwd 
+            FROM book2 
+            WHERE "송신_schema_adapter_" = '{input_data['send_system']}' 
+            AND "송신_Table_adapter_" = '{input_data['send_table']}'
+            AND "수신_schema_adapter_" = '{input_data['recv_system']}' 
+            AND "수신_Table_adapter_" = '{input_data['recv_table']}'
+            """
             
-            # 결과 가져오기
-            results = self.cursor.fetchall()
-            column_names = [description[0] for description in self.cursor.description]
+            # 첫 번째 쿼리만 표시
+            if idx == 0:
+                self.query_text.delete(1.0, tk.END)
+                self.query_text.insert(tk.END, query)
+            
+            try:
+                # 쿼리 실행
+                self.cursor.execute(query)
+                
+                # 결과 가져오기
+                results = self.cursor.fetchall()
+                
+                # 컬럼 이름 저장 (첫 번째 쿼리에서만)
+                if idx == 0:
+                    all_column_names = [description[0] for description in self.cursor.description]
+                
+                # 결과 저장
+                for row in results:
+                    # 입력값 정보 추가
+                    row_with_input = list(row) + [
+                        input_data['send_system'], 
+                        input_data['send_table'],
+                        input_data['recv_system'],
+                        input_data['recv_table']
+                    ]
+                    all_results.append(row_with_input)
+                
+            except sqlite3.Error as e:
+                messagebox.showerror("쿼리 오류", f"쿼리 실행 중 오류가 발생했습니다: {e}")
+                self.status_var.set("쿼리 실행 실패")
+                return
+        
+        # 컬럼 이름에 입력값 정보 추가
+        if all_column_names:
+            all_column_names = all_column_names + [
+                "송신_시스템", "송신_테이블", "수신_시스템", "수신_테이블"
+            ]
             
             # 결과 표시
-            self.display_formatted_results(results, column_names, system1, table1, system2, table2)
+            self.display_formatted_results(all_results, all_column_names)
             
-            self.status_var.set(f"특수 쿼리 실행 완료: {len(results)}개의 결과")
-            
-        except sqlite3.Error as e:
-            messagebox.showerror("쿼리 오류", f"쿼리 실행 중 오류가 발생했습니다: {e}")
-            self.status_var.set("쿼리 실행 실패")
+            self.status_var.set(f"특수 쿼리 실행 완료: {len(all_results)}개의 결과")
+        else:
+            messagebox.showinfo("정보", "쿼리 결과가 없습니다.")
     
-    def display_formatted_results(self, results, column_names, system1, table1, system2, table2):
+    def copy_results_to_clipboard(self):
+        """결과를 엑셀 형식으로 클립보드에 복사"""
+        if not self.result_tree.get_children():
+            messagebox.showinfo("정보", "복사할 결과가 없습니다.")
+            return
+        
+        # 헤더 가져오기
+        columns = self.result_tree["columns"]
+        
+        # CSV 형식으로 데이터 준비 (탭으로 구분)
+        output = io.StringIO()
+        writer = csv.writer(output, delimiter='\t')
+        
+        # 헤더 쓰기
+        writer.writerow(columns)
+        
+        # 데이터 쓰기
+        for item_id in self.result_tree.get_children():
+            row_data = self.result_tree.item(item_id)['values']
+            writer.writerow(row_data)
+        
+        # 클립보드에 복사
+        self.root.clipboard_clear()
+        self.root.clipboard_append(output.getvalue())
+        
+        messagebox.showinfo("복사 완료", "결과가 엑셀 형식으로 클립보드에 복사되었습니다.\n엑셀에서 붙여넣기 하세요.")
+    
+    def display_formatted_results(self, results, column_names):
         """특수 쿼리 결과를 보기 좋게 표시"""
         # 기존 테이블 내용 지우기
         for item in self.result_tree.get_children():
@@ -267,7 +365,7 @@ class SQLiteQueryApp:
         # 컬럼 헤더 설정 - 보기 좋게 스타일 적용
         for i, col in enumerate(column_names):
             # 중요 컬럼 강조
-            if col in ['COL1X', 'COL2X', 'COL3X', 'COL4X']:
+            if col in ['GroupID', 'EventID', '송신_시스템', '송신_테이블', '수신_시스템', '수신_테이블']:
                 self.result_tree.heading(col, text=f"★ {col} ★")
                 self.result_tree.column(col, width=120, anchor='center')
             else:
@@ -276,36 +374,21 @@ class SQLiteQueryApp:
         
         # 결과가 없는 경우
         if not results:
-            messagebox.showinfo("정보", f"'{system1}.{table1}, {system2}.{table2}'에 대한 검색 결과가 없습니다.")
+            messagebox.showinfo("정보", "쿼리 결과가 없습니다.")
             return
         
         # 결과 행 추가 - 보기 좋게 스타일 적용
         for i, row in enumerate(results):
-            row_values = list(row)
-            
-            # 특정 컬럼 값 강조 (예: 시스템 및 테이블 이름)
-            for j, val in enumerate(row_values):
-                col_name = column_names[j]
-                if col_name == 'COL1X' and val == system1:
-                    row_values[j] = f"✓ {val}"
-                elif col_name == 'COL2X' and val == table1:
-                    row_values[j] = f"✓ {val}"
-                elif col_name == 'COL3X' and val == system2:
-                    row_values[j] = f"✓ {val}"
-                elif col_name == 'COL4X' and val == table2:
-                    row_values[j] = f"✓ {val}"
-            
             # 행 추가
             tag = 'even' if i % 2 == 0 else 'odd'
-            self.result_tree.insert("", tk.END, values=row_values, tags=(tag,))
+            self.result_tree.insert("", tk.END, values=row, tags=(tag,))
         
         # 행 색상 설정 - 더 보기 좋게
         self.result_tree.tag_configure('even', background='#e6f2ff')  # 연한 파란색
         self.result_tree.tag_configure('odd', background='#ffffff')   # 흰색
         
         # 결과 요약 표시
-        messagebox.showinfo("검색 결과", 
-                           f"'{system1}.{table1}, {system2}.{table2}'에 대한 검색 결과: {len(results)}개 항목 발견")
+        messagebox.showinfo("검색 결과", f"쿼리 결과: {len(results)}개 항목 발견")
     
     def execute_query(self):
         """SQL 쿼리 실행"""
