@@ -16,6 +16,12 @@ class SQLiteQueryApp:
         self.conn = None
         self.cursor = None
         
+        # 하드코딩된 쿼리 상수
+        self.QUERY_CONSTANTS = {
+            'AAA.TAB1': {'system': 'AAA', 'table': 'TAB1'},
+            'BBB.TAB2': {'system': 'BBB', 'table': 'TAB2'}
+        }
+        
         # UI 구성
         self.create_widgets()
         
@@ -58,6 +64,14 @@ class SQLiteQueryApp:
         
         self.query_text = ScrolledText(query_frame, height=5)
         self.query_text.pack(fill=tk.X)
+        
+        # 특수 쿼리 버튼 영역
+        special_query_frame = ttk.LabelFrame(right_panel, text="특수 쿼리", padding="10")
+        special_query_frame.pack(fill=tk.X, pady=(0, 5))
+        
+        self.special_query_btn = ttk.Button(special_query_frame, text="AAA.TAB1, BBB.TAB2 쿼리 실행", 
+                                           command=self.execute_special_query)
+        self.special_query_btn.pack(padx=5, pady=5)
         
         # 쿼리 실행 버튼
         btn_frame = ttk.Frame(right_panel)
@@ -192,6 +206,107 @@ class SQLiteQueryApp:
         self.query_text.insert(tk.END, f"PRAGMA table_info({table_name})")
         self.execute_query()
     
+    def execute_special_query(self):
+        """하드코딩된 특수 쿼리 실행 (AAA.TAB1, BBB.TAB2)"""
+        if not self.conn:
+            messagebox.showwarning("경고", "먼저 데이터베이스에 연결하세요.")
+            return
+        
+        # 하드코딩된 값 사용
+        system1 = 'AAA'
+        table1 = 'TAB1'
+        system2 = 'BBB'
+        table2 = 'TAB2'
+        
+        # 하드코딩된 컬럼 이름
+        col1 = 'COL1X'
+        col2 = 'COL2X'
+        col3 = 'COL3X'
+        col4 = 'COL4X'
+        
+        # 쿼리 생성
+        query = f"""
+        SELECT * FROM book2 
+        WHERE {col1} = '{system1}' 
+        AND {col2} = '{table1}' 
+        AND {col3} = '{system2}' 
+        AND {col4} = '{table2}'
+        """
+        
+        # 쿼리 표시 및 실행
+        self.query_text.delete(1.0, tk.END)
+        self.query_text.insert(tk.END, query)
+        
+        try:
+            # 쿼리 실행
+            self.cursor.execute(query)
+            
+            # 결과 가져오기
+            results = self.cursor.fetchall()
+            column_names = [description[0] for description in self.cursor.description]
+            
+            # 결과 표시
+            self.display_formatted_results(results, column_names, system1, table1, system2, table2)
+            
+            self.status_var.set(f"특수 쿼리 실행 완료: {len(results)}개의 결과")
+            
+        except sqlite3.Error as e:
+            messagebox.showerror("쿼리 오류", f"쿼리 실행 중 오류가 발생했습니다: {e}")
+            self.status_var.set("쿼리 실행 실패")
+    
+    def display_formatted_results(self, results, column_names, system1, table1, system2, table2):
+        """특수 쿼리 결과를 보기 좋게 표시"""
+        # 기존 테이블 내용 지우기
+        for item in self.result_tree.get_children():
+            self.result_tree.delete(item)
+        
+        # 컬럼 설정
+        self.result_tree["columns"] = column_names
+        self.result_tree["show"] = "headings"  # 기본 첫 번째 컬럼 숨기기
+        
+        # 컬럼 헤더 설정 - 보기 좋게 스타일 적용
+        for i, col in enumerate(column_names):
+            # 중요 컬럼 강조
+            if col in ['COL1X', 'COL2X', 'COL3X', 'COL4X']:
+                self.result_tree.heading(col, text=f"★ {col} ★")
+                self.result_tree.column(col, width=120, anchor='center')
+            else:
+                self.result_tree.heading(col, text=col)
+                self.result_tree.column(col, width=100)
+        
+        # 결과가 없는 경우
+        if not results:
+            messagebox.showinfo("정보", f"'{system1}.{table1}, {system2}.{table2}'에 대한 검색 결과가 없습니다.")
+            return
+        
+        # 결과 행 추가 - 보기 좋게 스타일 적용
+        for i, row in enumerate(results):
+            row_values = list(row)
+            
+            # 특정 컬럼 값 강조 (예: 시스템 및 테이블 이름)
+            for j, val in enumerate(row_values):
+                col_name = column_names[j]
+                if col_name == 'COL1X' and val == system1:
+                    row_values[j] = f"✓ {val}"
+                elif col_name == 'COL2X' and val == table1:
+                    row_values[j] = f"✓ {val}"
+                elif col_name == 'COL3X' and val == system2:
+                    row_values[j] = f"✓ {val}"
+                elif col_name == 'COL4X' and val == table2:
+                    row_values[j] = f"✓ {val}"
+            
+            # 행 추가
+            tag = 'even' if i % 2 == 0 else 'odd'
+            self.result_tree.insert("", tk.END, values=row_values, tags=(tag,))
+        
+        # 행 색상 설정 - 더 보기 좋게
+        self.result_tree.tag_configure('even', background='#e6f2ff')  # 연한 파란색
+        self.result_tree.tag_configure('odd', background='#ffffff')   # 흰색
+        
+        # 결과 요약 표시
+        messagebox.showinfo("검색 결과", 
+                           f"'{system1}.{table1}, {system2}.{table2}'에 대한 검색 결과: {len(results)}개 항목 발견")
+    
     def execute_query(self):
         """SQL 쿼리 실행"""
         if not self.conn:
@@ -230,7 +345,7 @@ class SQLiteQueryApp:
             self.status_var.set("쿼리 실행 실패")
     
     def display_results(self, results, column_names):
-        """쿼리 결과를 테이블에 표시"""
+        """일반 쿼리 결과를 테이블에 표시"""
         # 기존 테이블 내용 지우기
         for item in self.result_tree.get_children():
             self.result_tree.delete(item)
