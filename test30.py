@@ -269,8 +269,8 @@ CCC.TAB1	DDD.TAB2
         
         # 각 입력값에 대해 쿼리 실행
         for idx, input_data in enumerate(parsed_inputs):
-            # 쿼리 생성
-            query = f"""
+            # book2 테이블에 대한 쿼리 생성
+            query_book2 = f"""
             SELECT GroupID, EventID, 송신_QMGR명, 송신_DB명, 송신_userid, 송신_passwd, 
                    수신_QMGR명, 수신_DB명, 수신_userid, 수신_passwd 
             FROM book2 
@@ -280,41 +280,87 @@ CCC.TAB1	DDD.TAB2
             AND "수신_Table_adapter_" = '{input_data['recv_table']}'
             """
             
+            # book3 테이블에 대한 쿼리 생성 (동일한 조건)
+            query_book3 = f"""
+            SELECT GroupID, EventID, 송신_QMGR명, 송신_DB명, 송신_userid, 송신_passwd, 
+                   수신_QMGR명, 수신_DB명, 수신_userid, 수신_passwd 
+            FROM book3 
+            WHERE "송신_schema_adapter_" = '{input_data['send_system']}' 
+            AND "송신_Table_adapter_" = '{input_data['send_table']}'
+            AND "수신_schema_adapter_" = '{input_data['recv_system']}' 
+            AND "수신_Table_adapter_" = '{input_data['recv_table']}'
+            """
+            
             # 첫 번째 쿼리만 표시
             if idx == 0:
                 self.query_text.delete(1.0, tk.END)
-                self.query_text.insert(tk.END, query)
+                self.query_text.insert(tk.END, f"-- Book2 테이블 쿼리\n{query_book2}\n\n-- Book3 테이블 쿼리\n{query_book3}")
             
             try:
-                # 쿼리 실행
-                self.cursor.execute(query)
-                
-                # 결과 가져오기
-                results = self.cursor.fetchall()
+                # book2 쿼리 실행
+                self.cursor.execute(query_book2)
+                results_book2 = self.cursor.fetchall()
                 
                 # 컬럼 이름 저장 (첫 번째 쿼리에서만)
                 if idx == 0:
-                    all_column_names = [description[0] for description in self.cursor.description]
+                    book2_column_names = [f"book2_{description[0]}" for description in self.cursor.description]
                 
-                # 결과 저장
-                for row in results:
-                    # 입력값 정보 추가
-                    row_with_input = list(row) + [
-                        input_data['send_system'], 
-                        input_data['send_table'],
-                        input_data['recv_system'],
-                        input_data['recv_table']
-                    ]
-                    all_results.append(row_with_input)
+                # book3 쿼리 실행
+                self.cursor.execute(query_book3)
+                results_book3 = self.cursor.fetchall()
+                
+                # 컬럼 이름 저장 (첫 번째 쿼리에서만)
+                if idx == 0:
+                    book3_column_names = [f"book3_{description[0]}" for description in self.cursor.description]
+                
+                # book2와 book3 결과 합치기
+                # book2 결과가 있는 경우
+                if results_book2:
+                    for book2_row in results_book2:
+                        # book3에 매칭되는 결과가 있는지 확인
+                        matching_book3_row = None
+                        for book3_row in results_book3:
+                            # 여기서는 GroupID와 EventID가 동일한 경우 매칭으로 간주
+                            if book2_row[0] == book3_row[0] and book2_row[1] == book3_row[1]:
+                                matching_book3_row = book3_row
+                                break
+                        
+                        # 매칭되는 book3 결과가 없으면 빈 값으로 채움
+                        if matching_book3_row is None:
+                            matching_book3_row = tuple([""] * len(results_book3[0])) if results_book3 else tuple([""] * 10)
+                        
+                        # 결과 합치기
+                        combined_row = list(book2_row) + list(matching_book3_row) + [
+                            input_data['send_system'], 
+                            input_data['send_table'],
+                            input_data['recv_system'],
+                            input_data['recv_table']
+                        ]
+                        all_results.append(combined_row)
+                
+                # book2 결과가 없지만 book3 결과가 있는 경우
+                elif results_book3:
+                    for book3_row in results_book3:
+                        # book2 결과가 없으므로 빈 값으로 채움
+                        empty_book2_row = [""] * 10
+                        
+                        # 결과 합치기
+                        combined_row = empty_book2_row + list(book3_row) + [
+                            input_data['send_system'], 
+                            input_data['send_table'],
+                            input_data['recv_system'],
+                            input_data['recv_table']
+                        ]
+                        all_results.append(combined_row)
                 
             except sqlite3.Error as e:
                 messagebox.showerror("쿼리 오류", f"쿼리 실행 중 오류가 발생했습니다: {e}")
                 self.status_var.set("쿼리 실행 실패")
                 return
         
-        # 컬럼 이름에 입력값 정보 추가
-        if all_column_names:
-            all_column_names = all_column_names + [
+        # 컬럼 이름 합치기
+        if book2_column_names and book3_column_names:
+            all_column_names = book2_column_names + book3_column_names + [
                 "송신_시스템", "송신_테이블", "수신_시스템", "수신_테이블"
             ]
             
@@ -365,7 +411,8 @@ CCC.TAB1	DDD.TAB2
         # 컬럼 헤더 설정 - 보기 좋게 스타일 적용
         for i, col in enumerate(column_names):
             # 중요 컬럼 강조
-            if col in ['GroupID', 'EventID', '송신_시스템', '송신_테이블', '수신_시스템', '수신_테이블']:
+            if col in ['book2_GroupID', 'book2_EventID', 'book3_GroupID', 'book3_EventID', 
+                      '송신_시스템', '송신_테이블', '수신_시스템', '수신_테이블']:
                 self.result_tree.heading(col, text=f"★ {col} ★")
                 self.result_tree.column(col, width=120, anchor='center')
             else:
