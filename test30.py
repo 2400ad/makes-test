@@ -274,10 +274,10 @@ CCC.TAB1	DDD.TAB2
             SELECT GroupID, EventID, 송신_QMGR명, 송신_DB명, 송신_userid, 송신_passwd, 
                    수신_QMGR명, 수신_DB명, 수신_userid, 수신_passwd 
             FROM book2 
-            WHERE "송신_schema_adapter_" = '{input_data['send_system']}' 
-            AND "송신_Table_adapter_" = '{input_data['send_table']}'
-            AND "수신_schema_adapter_" = '{input_data['recv_system']}' 
-            AND "수신_Table_adapter_" = '{input_data['recv_table']}'
+            WHERE TRIM("송신_schema_adapter_") = '{input_data['send_system']}' 
+            AND TRIM("송신_Table_adapter_") = '{input_data['send_table']}'
+            AND TRIM("수신_schema_adapter_") = '{input_data['recv_system']}' 
+            AND TRIM("수신_Table_adapter_") = '{input_data['recv_table']}'
             """
             
             # book3 테이블에 대한 쿼리 생성 (동일한 조건)
@@ -285,10 +285,10 @@ CCC.TAB1	DDD.TAB2
             SELECT GroupID, EventID, 송신_QMGR명, 송신_DB명, 송신_userid, 송신_passwd, 
                    수신_QMGR명, 수신_DB명, 수신_userid, 수신_passwd 
             FROM book3 
-            WHERE "송신_schema_adapter_" = '{input_data['send_system']}' 
-            AND "송신_Table_adapter_" = '{input_data['send_table']}'
-            AND "수신_schema_adapter_" = '{input_data['recv_system']}' 
-            AND "수신_Table_adapter_" = '{input_data['recv_table']}'
+            WHERE TRIM("송신_schema_adapter_") = '{input_data['send_system']}' 
+            AND TRIM("송신_Table_adapter_") = '{input_data['send_table']}'
+            AND TRIM("수신_schema_adapter_") = '{input_data['recv_system']}' 
+            AND TRIM("수신_Table_adapter_") = '{input_data['recv_table']}'
             """
             
             # 첫 번째 쿼리만 표시
